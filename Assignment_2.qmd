@@ -1,0 +1,364 @@
+---
+title: "Assignment_2"
+format: pdf
+editor: visual
+---
+
+## Exercise 1
+
+### Question 1
+
+Based on the code provided for a convolutional neural network in the exercise sheet, we can extrapolate the following:
+
+-   Type and size of the images: Colored images, 256 pixels x 256 pixels x 3 channels, (W x H x D)
+
+-   Depth of the convolutional layers: 3 layers
+
+-   Size of the filters:
+
+    -   1st layer: 6x6
+
+    -   2nd layer: 4x4
+
+    -   3rd layer: 2x2
+
+-   Number of batches processed in each training epoch: 185
+
+-   Activation functions and output activation:
+
+    -   Activation functions: ReLU
+
+    -   Output function: SoftMax
+
+-   Regularization: L2 Regularization in layer dense_1
+
+### Question 2
+
+-   Number of parameters of the second convolutional layer
+
+    -   The depth after conv_1 is 64.
+
+    -   In layer 2, we have a kernel size of 4 by 4, which is applied to each layer of the pooled image from layer 1. Therefore:
+
+        -   The size of each filter = 4 \* 4 \* 64 = 1024 + 1 bias term = 1025
+
+        -   Additionally, we have 128 filters in total, therefore, the total number of parameters:
+
+```{r}
+128*1025
+```
+
+-   Number of parameters of the first dense layer
+
+    -   layer 3 has (2\*2\*128 + 1) \* 128 = 65664
+
+    -   so in first dense layer we have (65664 + 1) \* 64 = 4202560 parameters
+
+```{r}
+65665 * 64
+```
+
+## Exercise 2.1
+
+```{r}
+# Load data and libraries
+load("data_assignment_2_activity_recognition.RData")
+library("keras3")
+library("tfruns")
+```
+
+**Initial Setup**
+
+-   Subjects performed 19 different physical activities
+
+-   8 people (4M, 4F), completed each activity wearing motion sensors
+
+**Sensor Setup**
+
+-   Each person wore 5 sensor units
+
+-   Each unit has 9 sensors, for a total of 45 sensors per person
+
+**Measurement**
+
+-   Sensors record at 25 samples per second (25 Hz)
+
+-   5-minute intervals are divided into 5-second segments, where each segment has 25 samples/sec \* 5 sec = 125 time points
+
+-   Each segment is a 125x45 matrix
+
+    -   Rows (125): each row is a snapshot of the 45 sensors at one instant
+
+    -   Columns (45): Each column is the 125-time-point recording from one sensor
+
+**Storage**
+
+-   Training/validation (x)
+
+    -   8170 signal segments (430 per activity x 19 activities)
+
+    -   Each segment is a 125 × 45 matrix, flattened into 5625 features (125 × 45).
+
+-   Test (x_test)
+
+    -   950 signal segments (50 per activity x 19 activities)
+
+    -   Each segment is a 125 × 45 matrix, flattened into 5625 features (125 × 45).
+
+**Model Implementation**
+
+The following models were implemented to predict the type of activity from the movement sensor data. Various models, structures, and hyperparameters were considered. The chosen models are
+
+-   **Model 1 - Convolutional Neural Network:** A simple CNN was chosen for the first model. The primary reason for this is that CNNs are best suited for dealing with data that have grid-like topology, as these sets have strong dependencies in local regions of the grid. It would be reasonable to assume there exists local dependencies in the sensor data, as movement measurements likely correlate to each other between the different body parts. The model was designed as follows:
+
+    -   Three convolutional layers were included with increasing depths (32 -\> 64) to capture hierarchical features, as deeper layers refine abstract features while balancing computational cost.
+
+        -   Kernel size (2x2) in first layer to focus on local features, then 3x3 in layers 2 and 3 for broader receptive fields that capture larger spatial patterns
+
+        -   Max-pooling (2x2) to reduce spatial dimensions and improve translation invariance
+
+    -   A 64-unit dense layer was chosen to compress flattened features into a lower-dimensional space before classification. ReLU activation introduces nonlinearity for better separability.
+
+    -   Dropout (10%): Randomly deactivates neurons during training to prevent overfitting.
+
+    -   L2 Regularization (Lambda = 0.1): Penalizes large weights to avoid over-reliance on specific features.
+
+-   **Model 2 - Deep Neural Network:** Deep Neural Networks (DNNs) automatically learn hierarchical feature representations from input data through multiple layers of abstraction. Each successive layer builds increasingly complex features by combining simpler patterns learned in previous layers. These properties could be useful for determining complex and hidden relationships between sensor recordings, yet the trade off is the flattening of the features data into a 2D array (matrix). Specifically, each segment (125 x 45) would be flattened into a 1D array of 5625 elements. The design for the model is as follows:
+
+    -   The length of the model is five layers, with a gradually decreasing width in each layer (Number of neurons), as earlier layers can extract low-level features, which require more units for processing, and deeper layers combine these into higher-level representations.
+
+    -   L2 regularization was added to penalize large weight and prevent overfitting using a moderate flexibility (lambda = 0.001).
+
+    -   Batch normalization is used to stabilize and accelerate training by normalizing the activations and reducing internal covariate shift.
+
+    -   Layer dropouts were included to randomly disable certain neurons during training and prevent overfitting. The dropout rate gradually decreases as early layers learn redundant low-level features that could benefit from dropout, while deeper layers learn more significant higher level representations that may be critical for classification.
+
+-   **Model 3 - LSTM Recurrent Neural Network:** Recurrent Neural Networks (RNNs), and specifically the Long Short-Term Memory (LSTM) variant used here, are particularly suited for analyzing sequential sensor data because they explicitly model temporal dependencies and can process raw sensor inputs directly. The model was designed as follows
+
+    -   First LSTM layer (64 units) processes all timestamps to capture short-term temporal patterns in sensor readings. The second layer (32 units) extracts longer-term dependencies from the first layer's output.
+
+Across all models, the following features remained equivalent:
+
+-   Data normalization: The training data was normalized by dividing x by the max value of the data, thereby constricting the range to -1 and 1. Normalization is beneficial as it makes learning patterns easier for models without being biased by the magnitude of the input.
+
+-   Adam optimizer: Adaptive learning rate (combines momentum + RMSprop) for stable convergence.
+
+-   Batch size \~ 10% of training data: balances memory constraints with gradient stability.
+
+### Model 1
+
+```{r}
+x_train <- x/max(x) # Normalize data
+y_cat <- to_categorical(as.integer(as.factor(y))-1) # Convert y to categorical
+set.seed(2025) # For reproducibility
+val <- sample(1:8170, 950) # Random sample 950 for validation set (same as test)
+# Extract training and validation from original training
+x_val <- x_train[val,,]
+y_val <- y_cat[val,]
+x_train <- x_train[-val,,]
+y_train <- y_cat[-val,]
+
+# Reshape into 4D array for CNN input
+x_train <- array_reshape(x_train, dim = c(dim(x_train)[1], 125, 45, 1))
+x_val <- array_reshape(x_val, dim = c(dim(x_val)[1], 125, 45, 1))
+
+# CNN model
+model_1 <- keras_model_sequential() %>%
+  # Convolutional and pooling layers
+  layer_conv_2d(filters = 32, kernel_size = c(2,2), activation = "relu",
+                input_shape = c(125, 45, 1)) %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2,2)) %>%
+  # Fully connected layers
+  layer_flatten() %>%
+  layer_dense(units = 64, activation = "relu", 
+              kernel_regularizer = regularizer_l2(0.1)) %>%
+  layer_dropout(0.1) %>%
+  layer_dense(units = 19, activation = "softmax") %>% 
+  compile(
+    loss = "categorical_crossentropy",
+    metrics = "accuracy",
+    optimizer = optimizer_adam()
+  )
+
+# Fit CNN to training data, validate on validation
+fit_1 <- model_1 %>% fit(
+  x = x_train, y = y_train,
+  validation_data = list(x_val, y_val),
+  epochs = 75,
+  batch_size = 700,
+  verbose = 0,
+)
+```
+
+### Model 2
+
+```{r}
+# Reshape training data into 2D array
+x_train2 <- array_reshape(x_train, dim = c(dim(x_train)[1], 125 * 45))
+x_val2 <- array_reshape(x_val, dim = c(dim(x_val)[1], 125 * 45))
+V <- ncol(x_train2) # Number of inputs
+
+# Set up DNN 
+model_2 <- keras_model_sequential() %>%
+  layer_dense(units = 1024, activation = "relu", input_shape = V,
+  kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 512, activation = "relu",
+  kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 256, activation = "relu",
+  kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 128, activation = "relu",
+  kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 19, activation = "softmax") %>%
+  compile(
+  loss = "categorical_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = "accuracy"
+)
+
+# Fit data
+fit_2 <- model_2 %>% fit(
+  x = x_train2, y = y_train,
+  validation_data = list(x_val2, y_val),
+  epochs = 75,
+  batch_size = 700,
+  verbose = 0,
+)
+```
+
+### Model 3
+
+```{r}
+# Reshape into 3D array for RNN Input
+x_train3 <- array_reshape(x_train, dim = c(dim(x_train)[1], 125, 45))
+x_val3 <- array_reshape(x_val, dim = c(dim(x_val)[1], 125, 45))
+
+model_3 <- keras_model_sequential() %>%
+  # LSTM layers
+  layer_lstm(units = 64, input_shape = c(125, 45), return_sequences = TRUE) %>%  
+  layer_lstm(units = 32) %>% 
+  # Output layer
+  layer_dense(units = 19, activation = "softmax") %>%
+  compile(
+    optimizer = optimizer_adam(),
+    loss = "categorical_crossentropy",
+    metrics = "accuracy"
+  )
+
+# Fit Data
+fit_3 <- model_3 %>% fit(
+  x = x_train3, y = y_train,
+  validation_data = list(x_val3, y_val),
+  epochs = 75,
+  batch_size = 700,
+  verbose = 0,
+)
+```
+
+### Model Comparisons
+
+-   Here we plot the accuracy and loss values of all models across epochs to determine the best model for prediction of daily/sports activity.
+
+```{r}
+out_acc <- cbind(
+  "CNN_train" = fit_1$metrics$accuracy,
+  "CNN_val" = fit_1$metrics$val_accuracy,
+  "DNN_train" = fit_2$metrics$accuracy,
+  "DNN_val" = fit_2$metrics$val_accuracy,
+  "RNN_train" = fit_3$metrics$accuracy,
+  "RNN_val" = fit_3$metrics$val_accuracy)
+
+out_loss <- cbind(
+  "CNN_train" = fit_1$metrics$loss,
+  "CNN_val" = fit_1$metrics$val_loss,
+  "DNN_train" = fit_2$metrics$loss,
+  "DNN_val" = fit_2$metrics$val_loss,
+  "RNN_train" = fit_3$metrics$loss,
+  "RNN_val" = fit_3$metrics$val_loss
+)
+
+cols <- c("black", "gray50", "darkorchid4", "magenta", "cyan4", "cyan1")
+
+smooth_line <- function(y) {
+  x <- 1:length(y)
+  out <- predict( loess(y ~ x) )
+  return(out)
+}
+
+matplot(out_loss, pch = 19, ylab = "Loss", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3), 
+        ylim = c(0, max(out_loss)*1.2))
+matlines(apply(out_loss, 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("topright", 
+       legend = c("CNN (Train)", "CNN (Val)", 
+                  "DNN (Train)", "DNN (Val)", 
+                  "RNN (Train)", "RNN (Val)"),
+       fill = cols, 
+       bty = "n", 
+       ncol = 2)
+grid()
+
+matplot(out_acc, pch = 19, ylab = "Accuracy", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3), 
+        ylim = c(0, max(out_acc)*1.2))
+matlines(apply(out_acc, 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("bottomright", 
+       legend = c("CNN (Train)", "CNN (Val)", 
+                  "DNN (Train)", "DNN (Val)", 
+                  "RNN (Train)", "RNN (Val)"),
+       fill = cols, 
+       bty = "n", 
+       ncol = 2)
+grid()
+```
+
+```{r}
+out_loss[75,]
+out_acc[75,]
+```
+
+-   When visualizing the training of all three models using loss and accuracy across epochs, there is some evidence that all models performed relatively well, with some stronger than others. For Model 1 (CNN), training was somewhat stable in terms of loss, starting out high, then plateauing to about 0.31 for the training data, and 0.3 for the validation data. The training of Model 1 in terms of accuracy was also stable, starting out low then increasing to 0.93 (Training) and 0.95 (Validation), with no signs of overfitting. It is uncommon to observe better validation performance, yet the minor marginal difference is not significant.
+
+-   For Model 2 (DNN), training was also stable. The loss value decreased to \~0.41 for training and \~0.61 for validation, and accuracy increased to \~0.96 for training and \~0.92 for validation. The fact that the training data performed better than the validation data is a more common observation. There is no sign of overfitting from the graphs, as neither accuracy nor loss became worse for the validation data.
+
+-   For Model 3 (LSTM - RNN), training was relatively unstable when compared to the other models. The loss values remained somewhat stable throughout training. At the first epoch, loss was estimated as \~2.93 for training, and \~2.91 for validation, then decreased to \~1.23 for training and \~1.21 for validation, which is not a significant decrease and relatively high. The accuracy score was also low, \~0.53 for training and \~0.52 for validation at the last epoch, indicating unstable training and performance.
+
+-   As a result, the best performing model would have to be Model 1 (CNN), as it achieved an optimal balance between low loss, high accuracy, and stability. CNN also handles spatial sensor data better than the LSTM RNN model. The model does not appear to need further tuning, unlike Model 2, which could benefit from regularization to prevent the minor overfitting, or Model 3 which needs architectural changes. The CNN also has the lowest gap between loss and accuracy for training and validation. Therefore, the test data will be used on Model 1 to evaluate its general predictive performance.
+
+## Exercise 2.2
+
+-   Here, we evaluate the predictive performance of Model 1 (CNN) on unseen test data.
+
+```{r}
+x_test <- x_test/max(x_test) # Normalize
+x_test <- array_reshape(x_test, dim = c(dim(x_test)[1], 125, 45, 1)) # Reshape
+y_test <- to_categorical(as.integer(as.factor(y_test))-1) # Reshape
+model_1 %>% evaluate(x_test, y_test, verbose = 0) # Evaluate
+
+class_labels <- c("sitting", "standing", "lying back", "lying right", 
+                  "stairs up", "stairs down", "elevator still", "elevator move", 
+                  "PL move", "tread flat", "tread incline", "running", "stepper", 
+                  "X trainer", "cyc hor", "cyc ver", "rowing", "jump", "bask")
+# Confusion matrix
+class_y <- class_labels[max.col(y_test)]
+class_hat <- class_labels[model_1 %>% predict(x_test) %>% max.col() ]
+tab <- table(class_y, class_hat)
+
+# Precision
+diag(tab)/colSums(tab)
+
+# Most likely classes
+ranks <- t( apply(tab, 1, function(x) {
+class_labels[ order(x, decreasing = TRUE)[1:3]] } ) )
+ranks
+```
+
+-   The model achieved an overall test accuracy of 69% with a loss of 1.22, demonstrating reasonable performance but clear room for improvement, particularly for certain challenging activities. It shows strong detection capabilities for horizontal cycling, elevator movement, jumping, lying on the right side, and parking lot movement, as evidenced by high precision scores, while also performing moderately well with basketball and vertical cycling. However, the model struggles significantly with sitting, stair descent, standing, stepper exercises, treadmill walking (both flat and incline), and cross trainer activities. Some notable misclassifications include labeling standing still in an elevator as ascending stairs, running as flat treadmill walking, and basketball as sitting, with the model frequently defaulting to sitting, stair ascent, or standing predictions when uncertain. These limitations suggest the need for additional training data focused on problematic classes, experimentation with alternative architectures, or adjustments to the training regimen to improve generalization across all activity types.
